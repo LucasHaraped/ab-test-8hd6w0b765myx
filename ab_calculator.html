@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A/B Test Sample Size Calculator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9f9f7; color: #1a1a18; padding: 2rem; }
+  h1 { font-size: 18px; font-weight: 500; margin-bottom: 1.5rem; color: #1a1a18; }
+  .section-label { font-size: 11px; font-weight: 500; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: #555; }
+  .field input[type=number] { width: 100%; padding: 8px 10px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 14px; background: #fff; }
+  .field input[type=number]:focus { outline: none; border-color: #888; }
+  .toggle-group { display: flex; border: 0.5px solid #ccc; border-radius: 8px; overflow: hidden; }
+  .toggle-group button { flex: 1; padding: 8px 10px; font-size: 13px; background: transparent; border: none; cursor: pointer; color: #888; transition: background 0.15s, color 0.15s; }
+  .toggle-group button.active { background: #f0efea; color: #1a1a18; font-weight: 500; }
+  .divider { border: none; border-top: 0.5px solid #e0e0d8; margin: 1.5rem 0; }
+  .results-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.5rem; }
+  .metric-card { background: #f0efea; border-radius: 8px; padding: 1rem; }
+  .metric-card .mlabel { font-size: 12px; color: #888; margin: 0 0 6px; }
+  .metric-card .mvalue { font-size: 22px; font-weight: 500; color: #1a1a18; margin: 0; }
+  .metric-card .msub { font-size: 12px; color: #888; margin: 4px 0 0; }
+  .note-box { background: #f0efea; border-left: 2px solid #ccc; padding: 10px 14px; font-size: 13px; color: #555; line-height: 1.5; }
+  .error-msg { font-size: 13px; color: #c0392b; padding: 10px 0; }
+  .wrap { max-width: 680px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>A/B test sample size calculator</h1>
+
+  <p class="section-label">Test parameters</p>
+  <div class="grid-3">
+    <div class="field">
+      <label>Confidence level (%)</label>
+      <input type="number" id="conf" value="95" min="50" max="99.9" step="0.1">
+    </div>
+    <div class="field">
+      <label>Power (%)</label>
+      <input type="number" id="power" value="80" min="50" max="99.9" step="0.1">
+    </div>
+    <div class="field">
+      <label>Variants (excl. control)</label>
+      <input type="number" id="variants" value="1" min="1" max="10" step="1">
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="field">
+      <label>Baseline conversion rate (%)</label>
+      <input type="number" id="baseline" value="30" min="0.01" max="99.99" step="0.01">
+    </div>
+    <div class="field">
+      <label>MDE (%)</label>
+      <input type="number" id="mde" value="5" min="0.01" step="0.01">
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:1.5rem;">
+    <div class="field">
+      <label>MDE type</label>
+      <div class="toggle-group">
+        <button id="btn-abs" class="active" onclick="setMdeType('absolute')">Absolute</button>
+        <button id="btn-rel" onclick="setMdeType('relative')">Relative</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Test tails</label>
+      <div class="toggle-group">
+        <button id="btn-two" class="active" onclick="setTails(2)">Two-sided</button>
+        <button id="btn-one" onclick="setTails(1)">One-sided</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="field" style="margin-bottom:1.5rem;">
+    <label>Weekly traffic (users entering experiment)</label>
+    <input type="number" id="traffic" value="10000" min="1" step="1">
+  </div>
+
+  <hr class="divider">
+
+  <p class="section-label">Results</p>
+  <div id="error" class="error-msg" style="display:none;"></div>
+  <div class="results-grid">
+    <div class="metric-card">
+      <p class="mlabel">Sample per variant</p>
+      <p class="mvalue" id="r-per-variant">—</p>
+    </div>
+    <div class="metric-card">
+      <p class="mlabel">Total sample</p>
+      <p class="mvalue" id="r-total">—</p>
+      <p class="msub" id="r-groups">—</p>
+    </div>
+    <div class="metric-card">
+      <p class="mlabel">Estimated duration</p>
+      <p class="mvalue" id="r-duration">—</p>
+      <p class="msub" id="r-duration-sub">—</p>
+    </div>
+  </div>
+  <div class="note-box" id="note-box"></div>
+</div>
+
+<script>
+  let mdeType = 'absolute';
+  let tails = 2;
+
+  function setMdeType(t) {
+    mdeType = t;
+    document.getElementById('btn-abs').classList.toggle('active', t === 'absolute');
+    document.getElementById('btn-rel').classList.toggle('active', t === 'relative');
+    calculate();
+  }
+
+  function setTails(n) {
+    tails = n;
+    document.getElementById('btn-two').classList.toggle('active', n === 2);
+    document.getElementById('btn-one').classList.toggle('active', n === 1);
+    calculate();
+  }
+
+  function normInv(p) {
+    const a=[-3.969683028665376e+01,2.209460984245205e+02,-2.759285104469687e+02,1.383577518672690e+02,-3.066479806614716e+01,2.506628277459239e+00];
+    const b=[-5.447609879822406e+01,1.615858368580409e+02,-1.556989798598866e+02,6.680131188771972e+01,-1.328068155288572e+01];
+    const c=[-7.784894002430293e-03,-3.223964580411365e-01,-2.400758277161838e+00,-2.549732539343734e+00,4.374664141464968e+00,2.938163982698783e+00];
+    const d=[7.784695709041462e-03,3.224671290700398e-01,2.445134137142996e+00,3.754408661907416e+00];
+    const pLow=0.02425,pHigh=1-pLow;
+    let q,r;
+    if(p<pLow){q=Math.sqrt(-2*Math.log(p));return(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+    else if(p<=pHigh){q=p-0.5;r=q*q;return(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);}
+    else{q=Math.sqrt(-2*Math.log(1-p));return-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  }
+
+  function fmt(n){return n.toLocaleString();}
+
+  function formatDuration(totalDays) {
+    if(totalDays<7){return{main:totalDays===1?'1 day':totalDays+' days',sub:''};}
+    const weeks=Math.floor(totalDays/7);
+    const remDays=totalDays%7;
+    const mainStr=weeks===1?'1 week':weeks+' weeks';
+    const subStr=remDays>0?`+ ${remDays} day${remDays>1?'s':''} (${totalDays} days total)`:`${totalDays} days total`;
+    return{main:mainStr,sub:subStr};
+  }
+
+  function calculate() {
+    const conf=parseFloat(document.getElementById('conf').value)/100;
+    const pow=parseFloat(document.getElementById('power').value)/100;
+    const baseline=parseFloat(document.getElementById('baseline').value)/100;
+    const mdeVal=parseFloat(document.getElementById('mde').value);
+    const nVariants=parseInt(document.getElementById('variants').value);
+    const traffic=parseFloat(document.getElementById('traffic').value);
+    const errEl=document.getElementById('error');
+
+    if(isNaN(conf)||isNaN(pow)||isNaN(baseline)||isNaN(mdeVal)||isNaN(nVariants)||isNaN(traffic)){
+      errEl.style.display='block';errEl.textContent='Please fill in all fields.';return;
+    }
+    if(baseline<=0||baseline>=1){errEl.style.display='block';errEl.textContent='Baseline conversion must be between 0% and 100%.';return;}
+    if(mdeVal<=0){errEl.style.display='block';errEl.textContent='MDE must be greater than 0.';return;}
+
+    const alphaAdjusted=(1-conf)/nVariants;
+    const alphaTailed=tails===2?alphaAdjusted/2:alphaAdjusted;
+    const zAlpha=normInv(1-alphaTailed);
+    const zBeta=normInv(pow);
+    let p2=mdeType==='absolute'?baseline+mdeVal/100:baseline*(1+mdeVal/100);
+
+    if(p2<=0||p2>=1){errEl.style.display='block';errEl.textContent='Resulting treatment rate out of range. Adjust MDE.';return;}
+    errEl.style.display='none';
+
+    const p1=baseline;
+    const pBar=(p1+p2)/2;
+    const n=Math.pow(zAlpha*Math.sqrt(2*pBar*(1-pBar))+zBeta*Math.sqrt(p1*(1-p1)+p2*(1-p2)),2)/Math.pow(p2-p1,2);
+    const nPerVariant=Math.ceil(n);
+    const groups=nVariants+1;
+    const totalN=nPerVariant*groups;
+    const totalDays=Math.ceil((totalN/traffic)*7);
+    const dur=formatDuration(totalDays);
+
+    document.getElementById('r-per-variant').textContent=fmt(nPerVariant);
+    document.getElementById('r-total').textContent=fmt(totalN);
+    document.getElementById('r-groups').textContent=`${groups} groups × ${fmt(nPerVariant)}`;
+    document.getElementById('r-duration').textContent=dur.main;
+    document.getElementById('r-duration-sub').textContent=dur.sub;
+
+    const treatRate=(p2*100).toFixed(2);
+    const absDiff=Math.abs((p2-p1)*100).toFixed(2);
+    const note=`Detecting a ${mdeType==='relative'?mdeVal+'% relative':absDiff+'pp absolute'} lift: ${(p1*100).toFixed(2)}% → ${treatRate}% conversion. `+
+      `${nVariants>1?`Bonferroni correction applied across ${nVariants} variants (α per comparison: ${(alphaAdjusted*100).toFixed(2)}%). `:''}`+
+      `${tails===2?'Two-sided test.':'One-sided test.'}`;
+    document.getElementById('note-box').textContent=note;
+  }
+
+  document.querySelectorAll('input[type=number]').forEach(el=>el.addEventListener('input',calculate));
+  calculate();
+</script>
+</body>
+</html>
